@@ -1,19 +1,19 @@
-# Welcome to your Expo app 👋
-
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+React Native: Framework para desenvolvimento mobile.
+Expo: Plataforma para desenvolvimento e build de aplicações React Native.
+React Hook Form: Biblioteca para manipulação de formulários.
+Zod: Validação de dados e schemas.
+AsyncStorage: API de armazenamento local para persistência de dados no dispositivo.
 
 ## Get started
 
-1. Install dependencies
+1. Instalando as dependências
 
    ```bash
    npm install
    ```
 
-2. Start the app
+2. Iniciando o app
 
    ```bash
-    npx expo start
+    npm run start
    ```
-
-

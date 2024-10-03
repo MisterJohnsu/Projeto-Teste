@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -7,9 +7,13 @@ import {
   StyleSheet,
   SafeAreaView,
   FlatList,
-  Alert,
 } from "react-native";
+import { useForm, Controller } from "react-hook-form";
+import { z } from "zod";
+import { zodResolver } from "@hookform/resolvers/zod";
+import  AsyncStorage  from "@react-native-async-storage/async-storage";
 
+// Interface para definir a estrutura de uma tarefa
 interface Task {
   id: string;
   title: string;
@@ -17,102 +21,166 @@ interface Task {
   completed: boolean;
 }
 
+// Definição do esquema de validação usando Zod
+const taskSchema = z.object({
+  title: z.string().min(1, "O título é obrigatório"),
+  description: z.string().optional(),
+});
+
+// Tipo inferido com base no schema do Zod
+type TaskFormData = z.infer<typeof taskSchema>;
+
 export default function TaskManager() {
+  // Estados para gerenciar a lista de tarefas, tarefa em edição, filtro e tarefa selecionada
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [newTitle, setNewTitle] = useState("");
-  const [newDescription, setNewDescription] = useState("");
   const [editTask, setEditTask] = useState<Task | null>(null);
   const [filter, setFilter] = useState<"all" | "complete" | "incomplete">("all");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
-  const addTask = () => {
-    if (newTitle.trim() === "") return;
+  // Hook para manipular o formulário, com validação integrada via Zod
+  const { control, handleSubmit, reset, formState: { errors } } = useForm<TaskFormData>({
+    resolver: zodResolver(taskSchema),
+    defaultValues: { title: "", description: "" },
+  });
 
+  // Função para obter todas as tarefas do armazenamento local
+  const getAllTasks = async () => {
+    try {
+      const storedTasks = await AsyncStorage.getItem("tasks");
+      return storedTasks ? JSON.parse(storedTasks) : [];
+    } catch (error) {
+      console.error("Erro ao carregar tarefas:", error);
+      return [];
+    }
+  };
+
+  // Função para salvar todas as tarefas no armazenamento local
+  const saveAllTasks = async (updatedTasks: Task[]) => {
+    try {
+      await AsyncStorage.setItem("tasks", JSON.stringify(updatedTasks));
+      setTasks(updatedTasks);
+    } catch (error) {
+      console.error("Erro ao salvar tarefas:", error);
+    }
+  };
+
+  // Função para adicionar uma nova tarefa
+  const addTask = async (task: TaskFormData) => {
     const newTask: Task = {
-      id: Math.random().toString(),
-      title: newTitle,
-      description: newDescription || "",
+      id: Date.now().toString(), // Usando timestamp como id
+      title: task.title,
+      description: task.description || "",
       completed: false,
     };
 
-    setTasks([...tasks, newTask]);
-    setNewTitle("");
-    setNewDescription("");
+    const updatedTasks = [...tasks, newTask];
+    await saveAllTasks(updatedTasks);
+    reset({ title: "", description: "" });
   };
 
-  const editExistingTask = (task: Task) => {
-    setTasks(
-      tasks.map((t) =>
-        t.id === task.id
-          ? { ...task, title: newTitle, description: newDescription }
-          : t
-      )
+  // Função para editar uma tarefa existente
+  const editExistingTask = async (taskData: TaskFormData) => {
+    if (editTask) {
+      const updatedTasks = tasks.map((task) =>
+        task.id === editTask.id
+          ? { ...task, title: taskData.title, description: taskData.description || "" }
+          : task
+      );
+
+      await saveAllTasks(updatedTasks);
+      setEditTask(null);
+      reset({ title: "", description: "" });
+    }
+  };
+
+  // Função para deletar uma tarefa
+  const deleteTask = async (task: Task) => {
+    const updatedTasks = tasks.filter((t) => t.id !== task.id);
+    await saveAllTasks(updatedTasks);
+  };
+
+  // Função para alternar o estado de conclusão de uma tarefa
+  const toggleCompleteTask = async (task: Task) => {
+    const updatedTasks = tasks.map((t) =>
+      t.id === task.id ? { ...t, completed: !t.completed } : t
     );
+
+    await saveAllTasks(updatedTasks);
+  };
+
+  // Função para abrir o menu de opções de uma tarefa
+  const openOptions = (task: Task) => {
+    setSelectedTask(task);
     setEditTask(null);
-    setNewTitle("");
-    setNewDescription("");
+    reset();
   };
 
-  const deleteTask = (taskId: string) => {
-    setTasks(tasks.filter((task) => task.id !== taskId));
+  // Função que executa ações (completar, editar, deletar) em uma tarefa selecionada
+  const handleOptionsAction = (action: string) => {
+    if (selectedTask) {
+      if (action === "complete" || action === "incomplete") {
+        toggleCompleteTask(selectedTask);
+      } else if (action === "edit") {
+        setEditTask(selectedTask);
+        reset({ title: selectedTask.title, description: selectedTask.description || "" });
+      } else if (action === "delete") {
+        deleteTask(selectedTask);
+      }
+    }
+    setSelectedTask(null);
+    reset();
   };
 
-  const toggleCompleteTask = (taskId: string) => {
-    setTasks(
-      tasks.map((task) =>
-        task.id === taskId ? { ...task, completed: !task.completed } : task
-      )
-    );
-  };
+  // Carregar tarefas do AsyncStorage quando o componente for montado
+  useEffect(() => {
+    getAllTasks().then((storedTasks) => setTasks(storedTasks));
+  }, []);
 
+  // Filtra as tarefas de acordo com o estado selecionado no filtro (todas, completas ou incompletas)
   const filteredTasks = tasks.filter((task) => {
     if (filter === "complete") return task.completed;
     if (filter === "incomplete") return !task.completed;
     return true;
   });
 
-  const openOptions = (task: Task) => {
-    setSelectedTask(task);
-  };
-
-  const handleOptionsAction = (action: string) => {
-    if (selectedTask) {
-      if (action === "complete") {
-        toggleCompleteTask(selectedTask.id);
-      } else if (action === "incomplete") {
-        toggleCompleteTask(selectedTask.id);
-      } else if (action === "edit") {
-        setEditTask(selectedTask);
-        setNewTitle(selectedTask.title);
-        setNewDescription(selectedTask.description || "");
-      } else if (action === "delete") {
-        deleteTask(selectedTask.id);
-      }
-    }
-    setSelectedTask(null);
-  };
-
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>Gerenciador de Tarefas</Text>
+      <Text style={styles.title}>Lista de Tarefas</Text>
 
+      {/* Formulário para adicionar ou editar uma tarefa */}
       <View style={styles.inputContainer}>
-        <TextInput
-          style={styles.input}
-          placeholder="Título"
-          value={newTitle}
-          onChangeText={setNewTitle}
+        <Controller
+          name="title"
+          control={control}
+          render={({ field: { onChange, value } }) => (
+            <TextInput
+              style={styles.input}
+              placeholder="Título"
+              value={value}
+              onChangeText={onChange}
+            />
+          )}
         />
-        <TextInput
-          style={styles.input}
-          placeholder="Descrição (Opcional)"
-          value={newDescription}
-          onChangeText={setNewDescription}
+        {errors.title && <Text style={styles.errorText}>{errors.title.message}</Text>}
+
+        <Controller
+          name="description"
+          control={control}
+          render={({ field: { onChange, value } }) => (
+            <TextInput
+              style={styles.input}
+              placeholder="Descrição (Opcional)"
+              value={value || ""}
+              onChangeText={onChange}
+            />
+          )}
         />
+
+        {/* Botão para adicionar ou salvar a edição da tarefa */}
         <View style={styles.buttonContainer}>
           <TouchableOpacity
             style={styles.addButton}
-            onPress={editTask ? () => editExistingTask(editTask) : addTask}
+            onPress={handleSubmit(editTask ? editExistingTask : addTask)}
           >
             <Text style={styles.addButtonText}>
               {editTask ? "Salvar Edição" : "Adicionar Tarefa"}
@@ -126,20 +194,24 @@ export default function TaskManager() {
         </View>
       </View>
 
+      {/* Filtro para alternar entre todas, completas ou incompletas */}
       <View style={styles.filterContainer}>
-        {["Todas", "Completas", "Incompletas"].map((type) => (
+        {["all", "complete", "incomplete"].map((type) => (
           <TouchableOpacity
             key={type}
             style={filter === type ? styles.filterButtonActive : styles.filterButton}
             onPress={() => setFilter(type as "all" | "complete" | "incomplete")}
           >
-            <Text style={styles.filterButtonText}>{type.charAt(0).toUpperCase() + type.slice(1)}</Text>
+            <Text style={styles.filterButtonText}>
+              {type.charAt(0).toUpperCase() + type.slice(1)}
+            </Text>
           </TouchableOpacity>
         ))}
       </View>
 
+      {/* Lista de tarefas filtradas */}
       <FlatList
-        data={filteredTasks}
+        data={tasks && filteredTasks}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <View style={[styles.taskCard, item.completed ? styles.taskCardComplete : styles.taskCardIncomplete]}>
@@ -149,7 +221,6 @@ export default function TaskManager() {
               {item.completed ? "Status: Completa" : "Status: Incompleta"}
             </Text>
             <View style={styles.taskActions}>
-              <View style={{ flex: 1 }} /> {/* Para empurrar o botão de opções para a direita */}
               <TouchableOpacity style={styles.taskButton} onPress={() => openOptions(item)}>
                 <Text style={styles.taskButtonText}>Opções</Text>
               </TouchableOpacity>
@@ -158,35 +229,22 @@ export default function TaskManager() {
         )}
       />
 
+      {/* Menu de opções para a tarefa selecionada */}
       {selectedTask && (
         <View style={styles.optionsContainer}>
           <TouchableOpacity
             style={styles.optionButton}
-            onPress={() =>
-              handleOptionsAction(selectedTask.completed ? "incomplete" : "complete")
-            }
+            onPress={() => handleOptionsAction(selectedTask.completed ? "incomplete" : "complete")}
           >
             <Text style={styles.optionButtonText}>
               {selectedTask.completed ? "Marcar como Incompleta" : "Marcar como Completa"}
             </Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.optionButton}
-            onPress={() => handleOptionsAction("edit")}
-          >
+          <TouchableOpacity style={styles.optionButton} onPress={() => handleOptionsAction("edit")}>
             <Text style={styles.optionButtonText}>Editar</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.optionButton}
-            onPress={() => handleOptionsAction("delete")}
-          >
+          <TouchableOpacity style={styles.optionButton} onPress={() => handleOptionsAction("delete")}>
             <Text style={styles.optionButtonText}>Excluir</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.optionButton}
-            onPress={() => setSelectedTask(null)}
-          >
-            <Text style={styles.optionButtonText}>Cancelar</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -194,125 +252,31 @@ export default function TaskManager() {
   );
 }
 
+// Estilos usados na interface do app
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 20,
-    backgroundColor: "#f8f9fa",
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: "bold",
-    marginBottom: 20,
-    textAlign: "center",
-  },
-  inputContainer: {
-    marginBottom: 20,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: "#ccc",
-    padding: 10,
-    marginBottom: 10,
-    borderRadius: 5,
-    backgroundColor: "#fff",
-  },
-  buttonContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  addButton: {
-    backgroundColor: "#5AAC44",
-    padding: 10,
-    borderRadius: 5,
-    alignItems: "center",
-    flex: 1,
-    marginRight: 5,
-  },
-  cancelButton: {
-    backgroundColor: "#ccc",
-    padding: 10,
-    borderRadius: 5,
-    alignItems: "center",
-    flex: 1,
-    marginLeft: 5,
-  },
-  addButtonText: {
-    color: "#fff",
-    fontWeight: "bold",
-  },
-  cancelButtonText: {
-    color: "#333",
-    fontWeight: "bold",
-  },
-  filterContainer: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    marginBottom: 20,
-  },
-  filterButton: {
-    padding: 10,
-    backgroundColor: "#ccc",
-    borderRadius: 5,
-  },
-  filterButtonActive: {
-    padding: 10,
-    backgroundColor: "#5AAC44",
-    borderRadius: 5,
-  },
-  filterButtonText: {
-    color: "#fff",
-    fontWeight: "bold",
-  },
-  taskCard: {
-    padding: 15,
-    marginBottom: 10,
-    borderRadius: 5,
-  },
-  taskCardComplete: {
-    backgroundColor: "#d4edda",
-  },
-  taskCardIncomplete: {
-    backgroundColor: "#ffeeba",
-  },
-  taskTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-  },
-  taskStatus: {
-    marginTop: 5,
-    fontWeight: "bold",
-  },
-  taskActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-  },
-  taskButton: {
-    padding: 5,
-    backgroundColor: "#007bff",
-    borderRadius: 5,
-    marginLeft: 10,
-  },
-  taskButtonText: {
-    color: "#fff",
-  },
-  optionsContainer: {
-    marginTop: 10,
-    backgroundColor: "#fff",
-    borderRadius: 5,
-    padding: 10,
-    borderColor: "#ccc",
-    borderWidth: 1,
-  },
-  optionButton: {
-    padding: 10,
-    backgroundColor: "#007bff",
-    borderRadius: 5,
-    marginBottom: 10,
-  },
-  optionButtonText: {
-    color: "#fff",
-    textAlign: "center",
-    fontWeight: "bold",
-  },
+  container: { flex: 1, padding: 16, backgroundColor: "#f5f5f5" },
+  title: { fontSize: 24, fontWeight: "bold", marginBottom: 16, textAlign: "center" },
+  inputContainer: { marginBottom: 16 },
+  input: { borderWidth: 1, borderColor: "#ccc", padding: 10, borderRadius: 5, marginBottom: 10 },
+  buttonContainer: { flexDirection: "row", justifyContent: "space-between" },
+  addButton: { backgroundColor: "#28a745", padding: 10, borderRadius: 5 },
+  addButtonText: { color: "#fff", textAlign: "center" },
+  cancelButton: { backgroundColor: "#dc3545", padding: 10, borderRadius: 5 },
+  cancelButtonText: { color: "#fff", textAlign: "center" },
+  errorText: { color: "#dc3545", marginBottom: 10 },
+  filterContainer: { flexDirection: "row", justifyContent: "space-around", marginBottom: 20 },
+  filterButton: { padding: 10, borderWidth: 1, borderRadius: 5, borderColor: "#ccc" },
+  filterButtonActive: { padding: 10, borderWidth: 1, borderRadius: 5, borderColor: "#28a745", backgroundColor: "#dff0d8" },
+  filterButtonText: { textAlign: "center" },
+  taskCard: { padding: 20, borderRadius: 5, marginBottom: 10, borderWidth: 1, borderColor: "#ccc" },
+  taskCardComplete: { backgroundColor: "#dff0d8" },
+  taskCardIncomplete: { backgroundColor: "#f8d7da" },
+  taskTitle: { fontSize: 18, fontWeight: "bold" },
+  taskStatus: { fontSize: 14, marginTop: 5 },
+  taskActions: { flexDirection: "row", justifyContent: "flex-end", marginTop: 10 },
+  taskButton: { backgroundColor: "#007bff", padding: 8, borderRadius: 5 },
+  taskButtonText: { color: "#fff" },
+  optionsContainer: { position: "absolute", bottom: 0, left: 0, right: 0, backgroundColor: "#fff", padding: 20, borderTopLeftRadius: 10, borderTopRightRadius: 10, shadowColor: "#000", shadowOpacity: 0.2, shadowOffset: { width: 0, height: -2 }, shadowRadius: 10 },
+  optionButton: { padding: 15, backgroundColor: "#007bff", borderRadius: 5, marginBottom: 10 },
+  optionButtonText: { color: "#fff", textAlign: "center" },
 });
