@@ -1,0 +1,13 @@
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model List {
+
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+  title String
+  description String
+  completed Boolean
+
+}
